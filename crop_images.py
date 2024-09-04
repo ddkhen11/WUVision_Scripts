@@ -28,7 +28,14 @@ def get_image_pairs(disaster_folder, location_folder):
     
     return []
 
-def crop_image_pair(before_path, after_path, output_folder, crop_size=256):
+def get_next_pair_number(output_base):
+    existing_pairs = [d for d in os.listdir(output_base) if d.startswith('pair_') and os.path.isdir(os.path.join(output_base, d))]
+    if not existing_pairs:
+        return 1
+    pair_numbers = [int(d.split('_')[1]) for d in existing_pairs]
+    return max(pair_numbers) + 1
+
+def crop_image_pair(before_path, after_path, output_base, crop_size=256):
     try:
         with Image.open(before_path) as before_img, Image.open(after_path) as after_img:
             width, height = before_img.size
@@ -38,7 +45,9 @@ def crop_image_pair(before_path, after_path, output_folder, crop_size=256):
             before_crop = before_img.crop((left, top, left + crop_size, top + crop_size))
             after_crop = after_img.crop((left, top, left + crop_size, top + crop_size))
             
-            # Create output folders
+            # Get the next pair number and create the output folder
+            pair_number = get_next_pair_number(output_base)
+            output_folder = os.path.join(output_base, f'pair_{pair_number}')
             os.makedirs(output_folder, exist_ok=True)
             
             # Save cropped images
@@ -46,9 +55,11 @@ def crop_image_pair(before_path, after_path, output_folder, crop_size=256):
             after_filename = os.path.basename(after_path)
             before_crop.save(os.path.join(output_folder, f'before_{before_filename}'))
             after_crop.save(os.path.join(output_folder, f'after_{after_filename}'))
-        print("Successfully cropped and saved images.")
+        print(f"Successfully cropped and saved images in {output_folder}.")
+        return output_folder
     except Exception as e:
         print(f"Error processing images: {e}")
+        return None
 
 def main():
     parser = argparse.ArgumentParser(description="Crop a pair of images from before and after an event.")
@@ -70,9 +81,12 @@ def main():
 
     # Crop and save the pair
     before_path, after_path = pairs[0]
-    crop_image_pair(before_path, after_path, output_base, args.size)
+    output_folder = crop_image_pair(before_path, after_path, output_base, args.size)
 
-    print(f"Processing completed. Check {output_base} for results.")
+    if output_folder:
+        print(f"Processing completed. Results saved in: {output_folder}")
+    else:
+        print("Processing failed.")
 
 if __name__ == "__main__":
     main()

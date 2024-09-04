@@ -54,7 +54,7 @@ python crop_images.py -d New-Zealand-Flooding23 -l ard_60_213311212303 -s 512
 ## Output Structure
 
 - `download_images.py` saves files in: `<output_directory>/images/<event_name>/<location>/<filename>`
-- `crop_images.py` saves cropped images in: `cropped_images/<disaster_name>/<location>/before_<filename>` and `after_<filename>`
+- `crop_images.py` saves cropped images in: `cropped_images/<disaster_name>/<location>/pair_<number>/before_<filename>` and `after_<filename>`
 
 ## Notes
 
