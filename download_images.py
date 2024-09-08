@@ -45,7 +45,7 @@ def main():
     with open(args.links, 'r') as file:
         urls = [line.strip() for line in file if line.strip()]
 
-    with ThreadPoolExecutor(max_xworkers=5) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(download_file, url, base_output_dir) for url in urls]
         for future in as_completed(futures):
             future.result()
