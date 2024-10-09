@@ -5,14 +5,12 @@ from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
-BASE_URL = "https://maxar-opendata.s3.us-west-2.amazonaws.com/events/"
-
 def download_file(url, base_output_dir):
     try:
         response = requests.get(url, stream=True)
         response.raise_for_status()
         
-        relative_path = url.split(BASE_URL, 1)[1] if BASE_URL in url else urlparse(url).path.lstrip('/')
+        relative_path = url.split("events/", 1)[1] if "events/" in url else urlparse(url).path.lstrip('/')
 
         path_components = relative_path.split('/')
         
