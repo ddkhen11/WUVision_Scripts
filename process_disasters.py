@@ -5,9 +5,7 @@ import leafmap
 import time
 from multiprocessing import Pool, cpu_count
 import multiprocessing
-from functools import partial
 from datetime import datetime
-import sys
 
 def run_get_valid_links(disaster):
     """Run get_valid_links.py for a specific disaster."""
@@ -34,8 +32,9 @@ def run_download_images(links_file, output_dir):
         print(f"Error downloading images: {e}")
         return False
 
-def run_get_all_valid_tiles(disaster, location, crop_size):
+def run_get_all_valid_tiles(args):
     """Run get_all_valid_tiles.py for a specific disaster and location."""
+    disaster, location, crop_size = args
     try:
         print(f"\nProcessing tiles for disaster: {disaster}, location: {location}")
         subprocess.run([
@@ -45,10 +44,10 @@ def run_get_all_valid_tiles(disaster, location, crop_size):
             '-l', location,
             '-s', str(crop_size)
         ], check=True)
-        return location, True
+        return (disaster, location, True)
     except subprocess.CalledProcessError as e:
         print(f"Error processing tiles for {location}: {e}")
-        return location, False
+        return (disaster, location, False)
 
 def get_locations_for_disaster(disaster):
     """Get all location folders for a specific disaster."""
@@ -58,21 +57,34 @@ def get_locations_for_disaster(disaster):
         return []
     return [d for d in os.listdir(disaster_path) if os.path.isdir(os.path.join(disaster_path, d))]
 
-def process_locations_parallel(disaster, locations, crop_size, max_workers=None):
-    """Process all locations for a disaster in parallel."""
-    if not max_workers:
-        max_workers = max(1, cpu_count() - 1)
+def check_disaster_downloaded(disaster):
+    """Check if images for a disaster have already been downloaded."""
+    # Normalize disaster name for comparison
+    disaster = disaster.replace("-", "").lower()
     
-    print(f"Processing {len(locations)} locations for {disaster} using {max_workers} workers")
+    # Check all directories in images folder
+    images_dir = 'images'
+    if not os.path.exists(images_dir):
+        return False
+        
+    existing_dirs = os.listdir(images_dir)
     
-    with Pool(processes=max_workers) as pool:
-        process_func = partial(run_get_all_valid_tiles, disaster, crop_size=crop_size)
-        results = pool.map(process_func, locations)
+    # Normalize existing directory names for comparison
+    for existing_dir in existing_dirs:
+        if existing_dir.replace("-", "").lower() == disaster:
+            disaster_path = os.path.join(images_dir, existing_dir)
+            locations = [d for d in os.listdir(disaster_path) 
+                        if os.path.isdir(os.path.join(disaster_path, d))]
+            
+            if locations:
+                print(f"\nFound existing downloads for {existing_dir} with {len(locations)} locations")
+                return True
     
-    return results
+    print(f"\nNo existing downloads found for {disaster}")
+    return False
 
-def process_disaster(disaster, crop_size, max_workers=None):
-    """Process a complete disaster workflow."""
+def process_disaster_sequential(disaster, crop_size):
+    """Process a single disaster sequentially."""
     start_time = datetime.now()
     print(f"\n{'='*80}")
     print(f"Processing disaster: {disaster}")
@@ -80,55 +92,48 @@ def process_disaster(disaster, crop_size, max_workers=None):
     print(f"{'='*80}")
     
     try:
-        # Step 1: Get valid links
-        links_file = os.path.join('filtered_links', f"{disaster}_filtered_images.txt")
-        if not os.path.exists(links_file):
-            if not run_get_valid_links(disaster):
-                print(f"Failed to get valid links for {disaster}")
-                return disaster, False
+        # Check if already downloaded
+        if not check_disaster_downloaded(disaster):
+            # Step 1: Get valid links
+            links_file = os.path.join('filtered_links', f"{disaster}_filtered_images.txt")
+            if not os.path.exists(links_file):
+                if not run_get_valid_links(disaster):
+                    print(f"Failed to get valid links for {disaster}")
+                    return []
+            else:
+                print(f"Using existing links file: {links_file}")
+            
+            # Step 2: Download images
+            if not run_download_images(links_file, os.getcwd()):
+                print(f"Failed to download images for {disaster}")
+                return []
         else:
-            print(f"Using existing links file: {links_file}")
+            print(f"Using existing downloads for {disaster}")
         
-        # Step 2: Download images
-        if not run_download_images(links_file, os.getcwd()):
-            print(f"Failed to download images for {disaster}")
-            return disaster, False
-        
-        # Step 3: Process locations in parallel
+        # Step 3: Get locations
         locations = get_locations_for_disaster(disaster)
         if not locations:
             print(f"No locations found for {disaster}")
-            return disaster, False
+            return []
         
-        results = process_locations_parallel(disaster, locations, crop_size, max_workers)
-        
-        # Process results
-        successful_locations = sum(1 for _, success in results if success)
-        print(f"\nProcessed {successful_locations}/{len(locations)} locations successfully for {disaster}")
-        
-        end_time = datetime.now()
-        duration = end_time - start_time
-        print(f"Duration: {duration}")
-        
-        return disaster, successful_locations > 0
+        # Return list of (disaster, location) tuples for parallel processing
+        return [(disaster, loc, crop_size) for loc in locations]
         
     except Exception as e:
         print(f"Unexpected error processing disaster {disaster}: {e}")
-        return disaster, False
+        return []
 
 def main():
     parser = argparse.ArgumentParser(description="Process multiple disasters end-to-end in parallel.")
     parser.add_argument("-d", "--disasters", nargs='+', help="List of disasters to process. If not specified, all available disasters will be processed.")
     parser.add_argument("-s", "--size", type=int, default=256, help="Size of the square crop in pixels")
     parser.add_argument("-w", "--workers", type=int, default=None, help="Number of worker processes to use. Defaults to CPU count - 1")
-    parser.add_argument("-dw", "--disaster-workers", type=int, default=2, help="Number of disasters to process in parallel. Defaults to 2")
     args = parser.parse_args()
 
     # Configure maximum workers
     max_workers = args.workers if args.workers is not None else max(1, cpu_count() - 1)
-    disaster_workers = min(args.disaster_workers, cpu_count())
     
-    print(f"Using {disaster_workers} workers for disasters and up to {max_workers} workers for locations")
+    print(f"Using {max_workers} worker processes")
     
     # Get list of disasters
     available_disasters = leafmap.maxar_collections()
@@ -143,29 +148,49 @@ def main():
     print(f"Will process the following disasters: {', '.join(disasters_to_process)}")
     time.sleep(3)  # Give user time to read the list
 
-    # Process disasters in parallel
-    process_func = partial(process_disaster, crop_size=args.size, max_workers=max_workers)
-    
     overall_start_time = datetime.now()
     print(f"\nStarting overall processing at: {overall_start_time}")
     
-    with Pool(processes=disaster_workers) as pool:
-        results = pool.map(process_func, disasters_to_process)
+    # Process each disaster sequentially, but locations in parallel
+    all_location_tasks = []
+    for disaster in disasters_to_process:
+        location_tasks = process_disaster_sequential(disaster, args.size)
+        all_location_tasks.extend(location_tasks)
     
-    # Process results
-    successful_disasters = sum(1 for _, success in results if success)
-    print(f"\nProcessing completed!")
-    print(f"Successfully processed {successful_disasters}/{len(disasters_to_process)} disasters")
+    if not all_location_tasks:
+        print("\nNo locations to process. Exiting.")
+        return
+        
+    print(f"\nProcessing {len(all_location_tasks)} total locations across all disasters")
+    
+    # Process all locations in parallel
+    successful_locations = 0
+    with Pool(processes=max_workers) as pool:
+        results = pool.map(run_get_all_valid_tiles, all_location_tasks)
+        
+        # Count successful locations
+        successful_locations = sum(1 for _, _, success in results if success)
     
     overall_end_time = datetime.now()
     overall_duration = overall_end_time - overall_start_time
+    
+    # Print final results
+    print("\nProcessing completed!")
+    print(f"Successfully processed {successful_locations}/{len(all_location_tasks)} locations")
     print(f"Total processing time: {overall_duration}")
     
-    # Print detailed results
-    print("\nDetailed results:")
-    for disaster, success in results:
-        status = "Success" if success else "Failed"
-        print(f"{disaster}: {status}")
+    # Print detailed results by disaster
+    print("\nDetailed results by disaster:")
+    disaster_results = {}
+    for disaster, location, success in results:
+        if disaster not in disaster_results:
+            disaster_results[disaster] = {"total": 0, "success": 0}
+        disaster_results[disaster]["total"] += 1
+        if success:
+            disaster_results[disaster]["success"] += 1
+    
+    for disaster, stats in disaster_results.items():
+        print(f"{disaster}: {stats['success']}/{stats['total']} locations successful")
 
 if __name__ == "__main__":
     # Required for Windows multiprocessing
