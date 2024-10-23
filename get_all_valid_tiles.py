@@ -35,7 +35,7 @@ def get_image_pairs(disaster_folder, location_folder):
     
     return []
 
-def is_valid_crop(image, bbox, non_black_threshold=0.9, non_white_threshold=0.5):
+def is_valid_crop(image, bbox, non_black_threshold=0.9):
     """
     Check if the crop is not mostly black or not mostly white (clouds).
     
@@ -51,10 +51,8 @@ def is_valid_crop(image, bbox, non_black_threshold=0.9, non_white_threshold=0.5)
     crop = image.crop(bbox)
     crop_array = torch.tensor(np.array(crop)).float() / 255
     non_black_pixels = torch.sum(crop_array > 0.1)  # Count pixels brighter than 10% intensity
-    # TODO: brightness of a pixel doesn't determine if it's white/a cloud
-    # non_white_pixels = torch.sum(crop_array < 0.85)  # Count pixels dimmer than 85% intensity
     total_pixels = crop_array.numel() / 3  # Divide by 3 for RGB channels
-    return (non_black_pixels / total_pixels) > non_black_threshold # and (non_white_pixels / total_pixels) > non_white_threshold
+    return (non_black_pixels / total_pixels) > non_black_threshold
 
 def process_image_pair(before_path, after_path, output_base, crop_size=256):
     """
